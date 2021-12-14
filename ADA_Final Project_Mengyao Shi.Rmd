@@ -1,0 +1,295 @@
+---
+title: "ADA_Final Project"
+author: "Mengyao Shi"
+date: "12/3/2021"
+output: html_document
+---
+
+```{r message=FALSE, warning=FALSE}
+# All libraries used in this project
+library(haven) # Data Import
+# library(DiagrammeR) # Create Conceptual Framework Diagram
+library(tidyverse) # Data Organization
+library(ggplot2) # Plotting
+library(tableone) # Data Table Making
+library(grid) # Plots Combination
+library(gridExtra) # Plots Combination
+library(knitr)
+library(markdown)
+library(rmarkdown)
+# library(MASS) # For Ordinal Logistic Regression
+# library(brant) # For Multilevel proportional odds testing
+```
+## 2. Research Question, Data Collection & Analysis
+
+### 2.1 Research Question
+To determine whether sex, race/ethnicity, BMI and alcohol consumption are associated with early-onset colorectal cancer using 2020 BRFSS survey data.
+
+### 2.2 Data Collection
+&nbsp;
+
+### 2.3 Analysis Plan
+
+For descriptive analysis, the characteristics of early-onset CRC patients and non-early-onset CRC participants will be compared. Frequency with percentage will be used for categorical variables while mean with standard deviation will be used for continuous variables. Then, to examine the association between potential risk factors (sex, race/ethnicity, BMI and alcohol consumption) and early-onset CRC, univariate and multivariable logistic regression models will be used to estimate odds ratios (ORs) with 95% confidence intervals (CIs). Based on literature review, the multivariable model will be adjusted for education level, income level, smoking status, and physical activity. Also, three assumptions will be checked or tested, including independence of observations, linearity and no perfect multicollinearity. All analyses will be performed using R (version 4.1.1.) and considered significant with 2-sided P < 0.05. 
+
+## 3. Data Analysis
+
+### 3.1 Data Import & Cleaning
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, include=FALSE}
+# open the haven package to read an xpt
+library(package = "haven")
+
+# create a temporary file to store the zipped file
+temp <- tempfile(fileext = ".zip")
+
+# use download.file to put the zipped file in the temp file
+download.file(url = "http://www.cdc.gov/brfss/annual_data/2020/files/LLCP2020XPT.zip", destfile = temp)
+
+# unzip it and read it
+brfss.2020 <- read_xpt(file = temp)
+
+# open tidyverse to select variables
+library(package = "tidyverse")
+library(package = "knitr")
+
+# select variables for analysis
+ada_eocrc <- brfss.2020 %>%
+  select(`CNCRTYP1`, `CNCRAGE`, `_SEX`, `CHCOCNCR`, `_BMI5CAT`, `_AGEG5YR`, `_RACEGR3`, `_INCOMG`, `_EDUCAG`, `_SMOKER3`, `_DRNKWK1`, `EXERANY2`)
+
+# export the data set to a csv file
+write.csv(x = ada_eocrc,
+          file = "~/Box/ada_eocrc.csv",
+          row.names = FALSE)
+
+# read the 2020 BRFSS data
+brfss2020 <- read.csv(file = "~/Box/ada_eocrc.csv")
+```
+
+```{r}
+# clean the data
+# filter CRC patients diagnosis < 50 
+eocrc1 <- brfss2020[which(brfss2020$CNCRTYP1 %in% c(10,14) & brfss2020$CNCRAGE < 50), ]
+# filter cancer free individuals
+eocrc2 <- brfss2020[which(brfss2020$CHCOCNCR == 2  & brfss2020$CNCRTYP1 %in% NA), ]
+# combine to total dataset
+eocrc <- rbind(eocrc1, eocrc2)
+
+# create a new variable 'cancer'
+eocrc$cancer <- ifelse(eocrc$CNCRTYP1 %in% c(10,14), 1, 2)
+
+
+# code missing values and add category labels
+eocrc.clean <- eocrc %>%
+  mutate(cancer = recode_factor(.x = cancer,
+                                   `1` = "EOCRC Patients",
+                                   `2` = "Non EOCRC Participants")) %>%
+  mutate(X_AGEG5YR = recode_factor(.x = X_AGEG5YR,
+                                   `1` = "Age 18 to 24",
+                                   `2` = "Age 25 to 29",
+                                   `3` = "Age 30 to 34",
+                                   `4` = "Age 35 to 39",
+                                   `5` = "Age 40 to 44",
+                                   `6` = "Age 45 to 49",
+                                   `7` = "Age 50 to 54",
+                                   `8` = "Age 55 to 59",
+                                   `9` = "Age 60 to 64",
+                                   `10` = "Age 65 to 59",
+                                   `11` = "Age 70 to 74",
+                                   `12` = "Age 75 to 79",
+                                   `13` = "Age 80 or older",
+                                   `14` = NA_character_)) %>%
+  mutate(X_RACEGR3 = recode_factor(.x = X_RACEGR3,
+                                   `1` = "White - Non-Hispanic",
+                                   `2` = "Black - Non-Hispanic",
+                                   `3` = "Other race only, Non-Hispanic",
+                                   `4` = "Multiracial, Non-Hispanic",
+                                   `5` = "Hispanic")) %>%
+  mutate(X_INCOMG = recode_factor(.x = X_INCOMG,
+                                  `1` = "Less than $15,000",
+                                  `2` = "$15,000 to less than $25,000",
+                                  `3` = "$25,000 to less than $35,000",
+                                  `4` = "$35,000 to less than $50,000",
+                                  `5` = "$50,000 or more",
+                                  `9` = NA_character_)) %>%
+  mutate(X_EDUCAG = recode_factor(.x = X_EDUCAG,
+                                  `1` = "Did not graduate High School",
+                                  `2` = "Graduated High School",
+                                  `3` = "Attended College or Technical School",
+                                  `4` = "Graduated from College or Technical School",
+                                  `9` = NA_character_)) %>%
+  mutate(X_SMOKER3 = recode_factor(.x = X_SMOKER3,
+                                   `1` = "Current smoker - now smokes every day",
+                                   `2` = "Current smoker - now smokes some days",
+                                   `3` = "Former smoker",
+                                   `4` = "Never smoked",
+                                   `9` = NA_character_)) %>%
+  mutate(X_BMI5CAT = recode_factor(.x = X_BMI5CAT,
+                                  `1` = "Underweight",
+                                  `2` = "Normal Weight",
+                                  `3` = "Overweight",
+                                  `4` = "Obese")) %>%
+  mutate(EXERANY2 = recode_factor(.x = EXERANY2,
+                                  `1` = "Have physical activity",
+                                  `2` = "No physical activity")) %>%
+  mutate(X_SEX = recode_factor(.x = X_SEX,
+                               `1` = "Male",
+                               `2` = "Female")) %>%
+  rename(age = X_AGEG5YR) %>%
+  rename(race = X_RACEGR3) %>%
+  rename(income = X_INCOMG) %>%
+  rename(education = X_EDUCAG) %>%
+  rename(smoke = X_SMOKER3) %>%
+  rename(bmi = X_BMI5CAT) %>%
+  rename(alcohol = X_DRNKWK1) %>%
+  rename(phyac = EXERANY2) %>%
+  rename(sex = X_SEX) %>%
+  select(cancer, age, race, income, education, smoke, bmi, alcohol, phyac, sex)
+
+# check new data
+summary(object = eocrc.clean)
+
+# remove outliers for alcohol
+Q <- quantile(eocrc.clean$alcohol, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(eocrc.clean$alcohol)
+up <-  Q[2]+1.5*iqr # Upper Range  
+low <- Q[1]-1.5*iqr # Lower Range
+eocrc.clean2 <- subset(eocrc.clean, eocrc.clean$alcohol > (Q[1] - 1.5*iqr) & eocrc.clean$alcohol < (Q[2]+1.5*iqr))
+
+summary(object = eocrc.clean2)
+```
+
+
+
+```{r  echo=FALSE, message=FALSE, warning = FALSE}
+# Make a table of descriptive stats by EOCRC status with bivariate tests
+table1 <- CreateTableOne(data = eocrc.clean2, 
+                         strata = 'cancer',
+                         vars = c('age', 'race', 'income', 'education', 'smoke', 'bmi', 'alcohol', 'phyac', 'sex' ))
+print(table1, showAllLevels = TRUE)
+```
+
+
+Since the outcome is a binary variable, a logistic regression model is used.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, include=FALSE}
+# check the order of the outcome variable categories
+levels(x = eocrc.clean2$cancer)
+
+# check the order of the predictors
+levels(x = eocrc.clean2$race)
+levels(x = eocrc.clean2$sex)
+levels(x = eocrc.clean2$bmi)
+
+
+# make "Non EOCRC Participants" "White" "Normal Weight" as the reference group
+eocrc.clean2 <- eocrc.clean2 %>%
+  mutate(cancer = relevel(x = cancer, ref = "Non EOCRC Participants")) %>%
+  mutate(bmi = relevel(x = bmi, ref = "Normal Weight"))
+
+# check the re-ordering
+levels(x = eocrc.clean2$race)
+levels(x = eocrc.clean2$sex)
+levels(x = eocrc.clean2$bmi)
+levels(x = eocrc.clean2$cancer)
+
+# reference: "White"  "Male" "Normal weight" "Non EOCRC Participants"
+```
+
+Multivariate Model:
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(package = "odds.n.ends")
+eocrc.mv.model <- glm(formula = cancer ~ sex + race + income + education + smoke + bmi + alcohol + phyac,
+                    data = eocrc.clean2,
+                    na.action = na.exclude,
+                    family = binomial("logit"))
+odds.n.ends( eocrc.mv.model)
+```
+
+Model assumption checking:
+
+1. Independence of observations: BRFSS conducted a telephone survey where a telephone number was randomly selected, so the assumption is met.
+2. Linearity: All predictors except for alcohol consumption are categorical, so the assumption does not apply. For alcohol consumption, the graph below shows the Loess curve close to the liner fit line, so the assumption is met.
+3. No perfect multicollinearity: None of the values in the right-hand column have a value of 2.5 or higher, so there is no discernable problem with multicollinearity.
+
+
+```{r}
+# check linearity
+# make a variable of the log-odds of the predicted values
+logit.eocrc <- log(x = eocrc.mv.model$fitted.values/(1-eocrc.mv.model$fitted.values))
+
+# make a small data frame with the log-odds variable and the alcohol predictor
+linearity.data <- data.frame(logit.eocrc, alcohol = eocrc.mv.model$model$alcohol)
+
+# make a plot
+linearity.data %>%
+  ggplot(aes(x = alcohol, y = logit.eocrc)) + 
+  geom_point(aes(size = "Observation"), color = "gray60", alpha = .6) +
+  geom_smooth(se = FALSE, aes(color = "Loess curve")) +
+  geom_smooth(method = lm, se = FALSE, aes(color = "linear")) +
+  theme_minimal() +
+  labs(x = "Total number of alcoholic beverages consumed per week",
+       y = "Log-odds of early-onset CRC predicted probability") +
+  scale_color_manual(name = "Type of fit line",
+                     values = c("dodgerblue2", "deeppink")) +
+  scale_size_manual(values = 1.5, name = "")
+```
+
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+# check multicollinearity
+library(package = "car")
+
+car::vif(mod =eocrc.mv.model)
+```
+
+
+Univariate Model:
+
+1. sex:
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+eocrc.sex <- glm(formula = cancer ~ sex,
+                    data = eocrc.clean2,
+                    na.action = na.exclude,
+                    family = binomial())
+odds.n.ends( eocrc.sex)
+```
+
+2. Race:
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+eocrc.race <- glm(formula = cancer ~ race,
+                    data = eocrc.clean2,
+                    na.action = na.exclude,
+                    family = binomial())
+odds.n.ends(eocrc.race)
+```
+
+3. BMI:
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+eocrc.bmi <- glm(formula = cancer ~ bmi,
+                    data = eocrc.clean2,
+                    na.action = na.exclude,
+                    family = binomial())
+odds.n.ends( eocrc.bmi)
+```
+
+4. Alcohol:
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+eocrc.alcohol <- glm(formula = cancer ~ alcohol,
+                    data = eocrc.clean2,
+                    na.action = na.exclude,
+                    family = binomial())
+odds.n.ends( eocrc.alcohol)
+```
+
+
+
+
+
+
+
+
+
+
